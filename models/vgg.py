@@ -6,10 +6,10 @@ class VGG(nn.Module):
 
     def __init__(self, cfgs, batch_norm, num_classes=1000, init_weights=True):
         super(VGG, self).__init__()
-        self.feature1 = self.make_layer(cfgs[0], batch_norm)
-        self.feature2 = self.make_layer(cfgs[1], batch_norm)
-        self.feature3 = self.make_layer(cfgs[2], batch_norm)
-        self.feature4 = self.make_layer(cfgs[3], batch_norm)
+        self.feature1 = self.make_layers(cfgs[0], batch_norm)
+        self.feature2 = self.make_layers(cfgs[1], batch_norm)
+        self.feature3 = self.make_layers(cfgs[2], batch_norm)
+        self.feature4 = self.make_layers(cfgs[3], batch_norm)
 
         self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
         self.classifier = nn.Sequential(
