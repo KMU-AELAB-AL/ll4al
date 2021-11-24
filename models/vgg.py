@@ -6,10 +6,10 @@ class VGG(nn.Module):
 
     def __init__(self, cfgs, batch_norm, num_classes=1000, init_weights=True):
         super(VGG, self).__init__()
-        self.feature1 = self.make_layers(cfgs[0], batch_norm)
-        self.feature2 = self.make_layers(cfgs[1], batch_norm)
-        self.feature3 = self.make_layers(cfgs[2], batch_norm)
-        self.feature4 = self.make_layers(cfgs[3], batch_norm)
+        self.feature1, in_channels = self.make_layers(cfgs[0], batch_norm)
+        self.feature2, in_channels = self.make_layers(cfgs[1], batch_norm, in_channels)
+        self.feature3, in_channels = self.make_layers(cfgs[2], batch_norm, in_channels)
+        self.feature4, in_channels = self.make_layers(cfgs[3], batch_norm, in_channels)
 
         self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
         self.classifier = nn.Sequential(
@@ -51,9 +51,9 @@ class VGG(nn.Module):
                 nn.init.normal_(m.weight, 0, 0.01)
                 nn.init.constant_(m.bias, 0)
 
-    def make_layers(self, cfg, batch_norm=False):
+    def make_layers(self, cfg, batch_norm=False, in_channels=3):
         layers = []
-        in_channels = 3
+        # in_channels = 3
         for v in cfg:
             if v == 'M':
                 layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
@@ -64,7 +64,7 @@ class VGG(nn.Module):
                 else:
                     layers += [conv2d, nn.ReLU(inplace=True)]
                 in_channels = v
-        return nn.Sequential(*layers)
+        return nn.Sequential(*layers), in_channels
 
 
 cfgs = {
