@@ -1,5 +1,6 @@
 import os
 import random
+from sklearn.cluster import AgglomerativeClustering
 
 import torch
 import numpy as np
@@ -13,11 +14,13 @@ from torchvision.datasets import CIFAR100, CIFAR10
 
 from tqdm import tqdm
 
-from config import *
+from config_clustering import *
 from models.resnet import ResNet18
 from models.lossnet import LossNet
 from data.transform import Cifar
 from data.sampler import SubsetSequentialSampler
+
+import autoencoder.models.vae as vae
 
 
 random.seed('KMU_AELAB')
@@ -145,11 +148,57 @@ def get_uncertainty(models, unlabeled_loader):
     return uncertainty.cpu()
 
 
+def get_cluster_result(model, data_loader):
+    model.eval()
+
+    features = torch.tensor([]).cuda()
+    with torch.no_grad():
+        for (inputs, labels) in data_loader:
+            inputs = inputs.cuda()
+
+            ae_out = model(inputs)
+
+            features = torch.cat((features, ae_out[1]), 0)
+    features = features.cpu().numpy()
+
+    return AgglomerativeClustering(n_clusters=CLS_CNT).fit_predict(features)
+
+
+def sampling(cluster_dict):
+    sampled = []
+    while len(sampled) < ADDENDUM:
+        order = sorted(list(cluster_dict.keys()), key=lambda x: cluster_dict[x])
+        quo, remain = (ADDENDUM - len(sampled)) // len(order), (ADDENDUM - len(sampled)) % len(order)
+        quo = quo if quo < min([len(i) for i in cluster_dict.values()]) else min([len(i) for i in cluster_dict.values()])
+
+        if quo:
+            for idx in order:
+                random.shuffle(cluster_dict[idx])
+                sampled.extend(cluster_dict[idx][:quo])
+                cluster_dict[idx] = cluster_dict[idx][quo:]
+
+                if not len(cluster_dict[idx]):
+                    del cluster_dict[idx]
+        else:
+            for idx in order[:remain]:
+                sampled.append(cluster_dict[idx].pop())
+    return sampled
+
+
 if __name__ == '__main__':
+    target_module = vae.VAE(NUM_RESIDUAL_LAYERS, NUM_RESIDUAL_HIDDENS, EMBEDDING_DIM)
+    checkpoint = torch.load(f'trained_ae/vae_{DATASET}.pth.tar')
+    target_module.load_state_dict(checkpoint['ae_state_dict'])
+    target_module.cuda()
+
     for trial in range(TRIALS):
         fp = open(f'record_{trial + 1}.txt', 'w')
 
         indices = list(range(NUM_TRAIN))
+        clustered_label = get_cluster_result(target_module, DataLoader(data_unlabeled, batch_size=BATCH,
+                                                                       sampler=SubsetSequentialSampler(indices),
+                                                                       pin_memory=True))
+
         random.shuffle(indices)
         labeled_set = indices[:INIT_CNT]
         unlabeled_set = indices[INIT_CNT:]
@@ -186,19 +235,25 @@ if __name__ == '__main__':
             print('Trial {}/{} || Cycle {}/{} || Label set size {}: Test acc {}'.format(trial + 1, TRIALS, cycle + 1,
                                                                                         CYCLES, len(labeled_set), acc))
 
-            random.shuffle(unlabeled_set)
-            subset = unlabeled_set[:SUBSET]
-
             unlabeled_loader = DataLoader(data_unlabeled, batch_size=BATCH,
-                                          sampler=SubsetSequentialSampler(subset),
+                                          sampler=SubsetSequentialSampler(unlabeled_set),
                                           pin_memory=True)
 
             uncertainty = get_uncertainty(models, unlabeled_loader)
 
             arg = np.argsort(uncertainty)
 
-            labeled_set += list(torch.tensor(subset)[arg][-ADDENDUM:].numpy())
-            unlabeled_set = list(torch.tensor(subset)[arg][:-ADDENDUM].numpy()) + unlabeled_set[SUBSET:]
+            subset = list(torch.tensor(unlabeled_set)[arg][-SUBSET:].numpy())
+            subset_label = clustered_label[subset]
+            subset_cluster = {}
+            for idx in range(SUBSET):
+                if subset_label[idx] not in subset_cluster:
+                    subset_cluster[subset_label[idx]] = [subset[idx]]
+                else:
+                    subset_cluster[subset_label[idx]].append(subset[idx])
+
+            labeled_set += sampling(subset_cluster)
+            unlabeled_set = list(set(unlabeled_set) - set(labeled_set))
 
             dataloaders['train'] = DataLoader(data_train, batch_size=BATCH,
                                               sampler=SubsetRandomSampler(labeled_set),

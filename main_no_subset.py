@@ -186,19 +186,17 @@ if __name__ == '__main__':
             print('Trial {}/{} || Cycle {}/{} || Label set size {}: Test acc {}'.format(trial + 1, TRIALS, cycle + 1,
                                                                                         CYCLES, len(labeled_set), acc))
 
-            random.shuffle(unlabeled_set)
-            subset = unlabeled_set[:SUBSET]
-
             unlabeled_loader = DataLoader(data_unlabeled, batch_size=BATCH,
-                                          sampler=SubsetSequentialSampler(subset),
+                                          sampler=SubsetSequentialSampler(unlabeled_set),
                                           pin_memory=True)
 
             uncertainty = get_uncertainty(models, unlabeled_loader)
 
             arg = np.argsort(uncertainty)
 
-            labeled_set += list(torch.tensor(subset)[arg][-ADDENDUM:].numpy())
-            unlabeled_set = list(torch.tensor(subset)[arg][:-ADDENDUM].numpy()) + unlabeled_set[SUBSET:]
+            labeled_set += list(torch.tensor(unlabeled_set)[arg][-ADDENDUM:].numpy())
+            unlabeled_set = list(set(unlabeled_set) - set(labeled_set))
+            print(len(labeled_set), len(unlabeled_set))
 
             dataloaders['train'] = DataLoader(data_train, batch_size=BATCH,
                                               sampler=SubsetRandomSampler(labeled_set),

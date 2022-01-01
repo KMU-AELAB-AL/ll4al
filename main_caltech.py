@@ -8,15 +8,16 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import torch.optim.lr_scheduler as lr_scheduler
 from torch.utils.data.sampler import SubsetRandomSampler
+from sklearn.model_selection import train_test_split
 
-from torchvision.datasets import CIFAR100, CIFAR10
+from torchvision.datasets import Caltech101
 
 from tqdm import tqdm
 
 from config import *
 from models.resnet import ResNet18
 from models.lossnet import LossNet
-from data.transform import Cifar
+from data.transform import Caltech
 from data.sampler import SubsetSequentialSampler
 
 
@@ -25,19 +26,10 @@ torch.manual_seed(0)
 torch.backends.cudnn.deterministic = True
 
 
-transforms = Cifar()
-
-
-if DATASET == 'cifar10':
-    data_train = CIFAR10('./data', train=True, download=True, transform=transforms.train_transform)
-    data_unlabeled = CIFAR10('./data', train=True, download=True, transform=transforms.test_transform)
-    data_test = CIFAR10('./data', train=False, download=True, transform=transforms.test_transform)
-elif DATASET == 'cifar100':
-    data_train = CIFAR100('./data', train=True, download=True, transform=transforms.train_transform)
-    data_unlabeled = CIFAR100('./data', train=True, download=True, transform=transforms.test_transform)
-    data_test = CIFAR100('./data', train=False, download=True, transform=transforms.test_transform)
-else:
-    raise FileExistsError
+transforms = Caltech()
+data_train = Caltech101('./data', download=True, transform=transforms.train_transform)
+data_unlabeled = Caltech101('./data', download=True, transform=transforms.test_transform)
+data_test = Caltech101('./data', download=True, transform=transforms.test_transform)
 
 
 def loss_pred_loss(input, target, margin=1.0, reduction='mean'):
@@ -149,15 +141,17 @@ if __name__ == '__main__':
     for trial in range(TRIALS):
         fp = open(f'record_{trial + 1}.txt', 'w')
 
-        indices = list(range(NUM_TRAIN))
-        random.shuffle(indices)
+        indices, test_set = train_test_split(np.arange(len(data_train.y)), test_size=0.1,
+                                             random_state=42, stratify=data_train.y)
+        indices, test_set = list(indices), list(test_set)
+
         labeled_set = indices[:INIT_CNT]
         unlabeled_set = indices[INIT_CNT:]
 
         train_loader = DataLoader(data_train, batch_size=BATCH,
                                   sampler=SubsetRandomSampler(labeled_set),
                                   pin_memory=True)
-        test_loader = DataLoader(data_test, batch_size=BATCH)
+        test_loader = DataLoader(data_test, batch_size=BATCH, sampler=SubsetRandomSampler(test_set))
         dataloaders = {'train': train_loader, 'test': test_loader}
 
         loss_module = LossNet().cuda()
@@ -198,7 +192,7 @@ if __name__ == '__main__':
             arg = np.argsort(uncertainty)
 
             labeled_set += list(torch.tensor(subset)[arg][-ADDENDUM:].numpy())
-            unlabeled_set = list(torch.tensor(subset)[arg][:-ADDENDUM].numpy()) + unlabeled_set[SUBSET:]
+            unlabeled_set = list(set(unlabeled_set) - set(labeled_set))
 
             dataloaders['train'] = DataLoader(data_train, batch_size=BATCH,
                                               sampler=SubsetRandomSampler(labeled_set),
